@@ -32,14 +32,12 @@ public static extern bool ShowWindow(IntPtr hWnd, Int32 nCmdShow);
 $consolePtr = [Console.Window]::GetConsoleWindow()
 [Console.Window]::ShowWindow($consolePtr, 0)
 
-<#
 # Declare Global Variables
 $global:disks
 $global:OfflineDisks = @()
 $global:errormsg
 $global:vmFQDN
 $global:DomainCreds
-/#>
 
 Function GetOfflineDisks{
 $global:offlinedisks = @()
