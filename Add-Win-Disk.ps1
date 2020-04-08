@@ -10,12 +10,14 @@
 
         Author:             James May
         Email:              jamay@jackhenry.com
-        Last Modified:      04/3/20
+        Last Modified:      04/8/20
 
         Changelog:
             a1.0             Initial Development.  Script works when run locally under specific circumstances. No checks coded yet.
             a2.0             GUI integrated. GetOfflineDisks, ErrorsDetected, and ProvisionDisk functions written and functional.
+            a3.0             Added checks for empty values, entries that didn't match, and existing assignments.  Corrected some error status messages.
 #>
+
 
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -30,13 +32,14 @@ public static extern bool ShowWindow(IntPtr hWnd, Int32 nCmdShow);
 $consolePtr = [Console.Window]::GetConsoleWindow()
 [Console.Window]::ShowWindow($consolePtr, 0)
 
+<#
 # Declare Global Variables
 $global:disks
 $global:OfflineDisks = @()
 $global:errormsg
 $global:vmFQDN
 $global:DomainCreds
-
+/#>
 
 Function GetOfflineDisks{
 $global:offlinedisks = @()
@@ -95,6 +98,7 @@ Else {
 }
 
 Function ErrorsDetected{
+    
     $OutBox.text = $global:errormsg | Format-table -AutoSize | Out-String 
     $ExecuteAllSteps.visible = $false
     $DriveletterLabel.Visible = $false
@@ -106,9 +110,62 @@ Function ErrorsDetected{
     $DiskNumberLabel.Visible = $false
     $DiskNumber.Visible = $false
     $AddDiskForm.Refresh()
+ 
     }
 
 Function ProvisionDisk{
+
+        #check for empty entries
+    If ($DiskNumber.TextLength -eq 0){
+       $global:errormsg = "Error Detected:  DiskNumber is empty.  Please enter a disk number to provision and try again."
+       $Outbox.text = $global:errormsg
+       $AddDiskForm.Refresh()
+       return
+       }
+    if ($Driveletter.TextLength -eq 0){
+        $global:errormsg = "Error Detected:  Driveletter is empty. Please enter a drive letter to assign during formatting and try again."
+        $Outbox.text = $global:errormsg
+        $AddDiskForm.Refresh()
+        return
+        }
+    if ($PartitionStyle.SelectedIndex -eq -1) {
+        $global:errormsg = "Error Detected:  Partition Style not selected.  Please choose Partition Style and try again."
+        $Outbox.text = $global:errormsg
+        $AddDiskForm.Refresh()
+        return
+        }
+    if ($AllocationUnitSize.SelectedIndex -eq -1){
+        $global:errormsg = "Error Detected:  Allocation Unit not selected.  Please choose Allocation Unit and try again."
+        $Outbox.text = $global:errormsg
+        $AddDiskForm.Refresh()
+        return
+        }
+    #check to see if disk number is valid
+    
+   if ($global:offlinedisks.number -notcontains $DiskNumber.Text){
+        $OfflineList =  $global:offlinedisks | Format-table -AutoSize | Out-String 
+        $global:errormsg = "Error Detected:  Disk number entered does not match any offline disks.  Please choose the number of an offline disk and try again.`r`n" + $OfflineList
+        $Outbox.text = $global:errormsg 
+        $AddDiskForm.Refresh()
+        return
+        }
+
+    #collect volume letters in use
+    try {$GetVolume = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {Get-Volume}}
+       catch {
+            $global:errormsg = "Error Detected: Could not run get-volume on remote machine."  + $_ + $GetVolume.Exception
+            ErrorsDetected
+            return
+            }
+   
+    #check to see if driveletter already in use
+    if ($GetVolume.Driveletter -contains $Driveletter.text){
+        $global:errormsg = "Error Detected:  Drive letter is already in use.  Please choose a different drive letter and try again."
+        $Outbox.text = $global:errormsg
+        $AddDiskForm.Refresh()
+        return
+        }
+
     #update GUI
     $statusupdates = "Attempting to Online Disk " + $DiskNumber.text
     $Outbox.text = $statusupdates
@@ -194,20 +251,20 @@ Function ProvisionDisk{
    }
 
     #update GUI
-    $statusupdates += "Formatting Disk " + $DiskNumber.Text + " as " + $Driveletter.Text + ":\ as NTFS with " + $AllocationUnitSize.Text + " block size"
+    $statusupdates += "Formatting Disk " + $DiskNumber.Text + " as " + $Driveletter.Text + ":\ with NTFS with " + $AllocationUnitSize.Text + " block size"
     $Outbox.text = $statusupdates
     $AddDiskForm.Refresh()
 
     #Format Volume
     try {$FormatDisk = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {Format-Volume -DriveLetter $using:Driveletter.Text -FileSystem NTFS -AllocationUnitSize $using:AllocationUnit -confirm:$false}}
-    catch { $statusupdates += ".......[Success]`r`n"
+    catch { $statusupdates += ".....[Failed]`r`n"
             $global:errormsg = $statusupdates + $_ + $FormatDisk.Exception
             ErrorsDetected
             return
             }
     
     #update GUI
-    $statusupdates += ".......[Success]`r`n"
+    $statusupdates += ".....[Success]`r`n"
     $Outbox.text = $statusupdates
     $AddDiskForm.Refresh()
     
@@ -218,7 +275,7 @@ Function ProvisionDisk{
 
     #Start the Shell Hardware Detection Service back up.
     try {$StartService = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {Start-Service -Name ShellHWDetection}}
-    catch { $statusupdates += ".................[Success]`r`n"
+    catch { $statusupdates += ".................[Failed]`r`n"
             $global:errormsg = $statusupdates + $_ + $StartService.Exception
             ErrorsDetected
             return
@@ -241,7 +298,7 @@ Function ProvisionDisk{
     $DiskNumberLabel.Visible = $false
     $DiskNumber.Visible = $false
     $AddDiskForm.Refresh()
-
+    
 }
 
 
