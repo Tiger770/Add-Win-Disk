@@ -10,12 +10,13 @@
 
         Author:             James May
         Email:              jamay@jackhenry.com
-        Last Modified:      04/8/20
+        Last Modified:      03/05/21
 
         Changelog:
             a1.0             Initial Development.  Script works when run locally under specific circumstances. No checks coded yet.
             a2.0             GUI integrated. GetOfflineDisks, ErrorsDetected, and ProvisionDisk functions written and functional.
             a3.0             Added checks for empty values, entries that didn't match, and existing assignments.  Corrected some error status messages.
+            a4.0             Added in a check for RAW Disks if no offline disks found.  Coded a conditional statement around the online process if disks are already online.
 #>
 
 
@@ -60,17 +61,29 @@ $Domain = $global:vmFQDN.Substring($Split+1)
 $global:DomainCreds = $host.ui.PromptForCredential("GuestVM Credentials Needed", "Please enter your credentials to access systems joined to the $Domain domain.", "", "NetBiosUserName")
 
 #Gather Remote Disk Information
-$disks = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {Get-Disk|select Number,Friendlyname,OperationalStatus,Size}
+$disks = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {Get-Disk|select Number,Friendlyname,OperationalStatus,Size,PartitionStyle}
 
 #Populate Array with Data
 foreach ($disk in $disks) {
     If ($disk.operationalstatus -like 'Offline') {
-        $OfflineProperties = @{Number=$Disk.Number;Details=$disk.FriendlyName;Status=$disk.operationalstatus;SizeGB=($disk.size/1gb)}
+        $OfflineProperties = @{Number=$Disk.Number;Details=$disk.FriendlyName;Status=$disk.operationalstatus;SizeGB=($disk.size/1gb);Partitionstyle=$disk.partitionstyle}
         $OfflineDisk = New-Object PSobject -Property $OfflineProperties
         $global:offlinedisks += $OfflineDisk
         }
     
     }
+
+ If ($global:offlinedisks.number -eq $null){
+        foreach ($disk in $disks) {
+            If ($disk.partitionstyle -like 'RAW') {
+            $OfflineProperties = @{Number=$Disk.Number;Details=$disk.FriendlyName;Status=$disk.operationalstatus;SizeGB=($disk.size/1gb);Partitionstyle=$disk.partitionstyle}
+            $OfflineDisk = New-Object PSobject -Property $OfflineProperties
+            $global:offlinedisks += $OfflineDisk
+            }
+        }
+ }
+
+    
 
 #Check for empty values
 if ($global:offlinedisks.Number -eq $null) {
@@ -168,14 +181,20 @@ Function ProvisionDisk{
     $statusupdates = "Attempting to Online Disk " + $DiskNumber.text
     $Outbox.text = $statusupdates
     $AddDiskForm.Refresh()
+     
+    #check to see if the disk is already online
+    $DiskOperationalStatus = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {get-disk -Number $using:DiskNumber.Text}
       
     #online Disk
-    try { $OnlineDisk = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {set-disk -Number $using:DiskNumber.Text -IsOffline $False}}
-    catch { $statusupdate += "...............................[Failed]`r`n"
-            $global:errormsg = $statusupdates + $_ + $OnlineDisk.Exception
-            ErrorsDetected
-            return
-            }
+    
+    if ($DiskOperationalStatus.OperationalStatus -like 'Offline') {
+        try { $OnlineDisk = Invoke-Command -ComputerName $global:vmFQDN -Credential $global:DomainCreds {set-disk -Number $using:DiskNumber.Text -IsOffline $False}}
+        catch { $statusupdate += "...............................[Failed]`r`n"
+                $global:errormsg = $statusupdates + $_ + $OnlineDisk.Exception
+                ErrorsDetected
+                return
+                }
+    }
 
     #update GUI
     $statusupdates += "...............................[Success]`r`n"
